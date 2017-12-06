@@ -202,6 +202,7 @@ void loop() {
         logger("Relay is on, going off");
 
         relaySw(false);
+        relayTimeout = 0;
       } else if (timeNow >= relayTimeout) {
 
         relayTimeout = timeNow + ((1000 * 60 ) * 60 * 3);
@@ -232,7 +233,7 @@ void loop() {
       }
 
     } else {
-
+relayTimeout = 0;
       relaySw(masterSaysRelay);
 
     }
@@ -241,6 +242,7 @@ void loop() {
       timeOut += 100;
       targetTemp += ro_dir;
       writeTempsToScreen(meanTemp);
+      relaySwing = (targetTemp - meanTemp) * 10;
     }
 
     dtLow = !digitalRead(4);
@@ -256,6 +258,7 @@ void loop() {
   if (timeNow >= timeOut) {
 
     logger("Time: " + String(timeNow));
+    logger("Relay Swing: " + String(relaySwing));
 
     masterCheck--;
     if (masterCheck <= 0) {
@@ -598,6 +601,8 @@ void writeMsgToScreen(String msg) {
 
 void relaySw(bool relay) {
 
+relaySwing = 0;
+
   if (relay != relayOn) {
 
     if (relay) {
@@ -609,7 +614,7 @@ void relaySw(bool relay) {
       writeMsgToScreen("OFF");
     }
     relayOn = relay;
-    relaySwing = 0;
+
     digitalWrite(relayPin, !relay);
     timeOut += 1500;
     delay(1000);
@@ -731,4 +736,3 @@ void logger(String str) {
   sendPacket("L" + str);
 
 }
-
