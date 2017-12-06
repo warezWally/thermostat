@@ -14,6 +14,7 @@ int CONTROLLER_EEPROM = 0;
 bool MASTER_ALIVE = false;
 int masterCheck = 0;
 bool masterSaysRelay = false;
+bool firstRun = true;
 
 //MEASUREMENT
 int readingPin = A0;
@@ -43,7 +44,7 @@ byte lives = 3; //HOW MANY MINUTES BEFORE MEASUREMENT IS DELETED;
 int relayPin = 2;
 bool relayOn = false;
 unsigned long relayTimeout = 0;
-char relaySwing = 0;
+int relaySwing = 0;
 
 //SCREEN
 
@@ -172,6 +173,11 @@ void setup()
   };
 
   CONTROLLER = (EEPROM.read(CONTROLLER_EEPROM) == deviceID);
+  if (CONTROLLER) {
+
+    controllerSetup();
+
+  }
 
   delay(500);
 }
@@ -215,17 +221,15 @@ void loop() {
       }
       roSw = false;
     } else if (!MASTER_ALIVE) {
-
+     // Serial.println("relaySwing: " + String(relaySwing));
       if (timeNow > relayTimeout) {
 
-        relaySwing += (meanTemp < targetTemp) ? 1 : -1;
-
         if (relaySwing <= -3) {
-
+          logger("I AM IN CONTROL");
           relaySw(false);
 
         } else if (relaySwing >= 3) {
-
+          logger("I AM IN CONTROL");
           relaySw(true);
 
         }
@@ -233,7 +237,7 @@ void loop() {
       }
 
     } else {
-relayTimeout = 0;
+      relayTimeout = 0;
       relaySw(masterSaysRelay);
 
     }
@@ -242,7 +246,7 @@ relayTimeout = 0;
       timeOut += 100;
       targetTemp += ro_dir;
       writeTempsToScreen(meanTemp);
-      relaySwing = (targetTemp - meanTemp) * 10;
+      relaySwing = int(targetTemp - meanTemp) * 10;
     }
 
     dtLow = !digitalRead(4);
@@ -350,12 +354,12 @@ relayTimeout = 0;
     count = 0;
     temp_float = 0;
 
+    meanTemp = meanTemp / howManyValid;
+    relaySwing += (meanTemp < targetTemp) ? (1 + (firstRun * 10)) : (-1 - (firstRun * 10)) ;
+    firstRun = false;
   }
 
-  meanTemp = meanTemp / howManyValid;
-
   writeTempsToScreen(int(meanTemp));
-
   int packetSize = Udp.parsePacket();
 
   if (packetSize)
@@ -486,6 +490,7 @@ relayTimeout = 0;
                 incomingPacket[1] = 0x20;
 
                 targetTemp = atoi(incomingPacket);
+                relaySwing = int(targetTemp - meanTemp) * 10;
                 writeTempsToScreen(meanTemp);
               }
               break;
@@ -601,17 +606,20 @@ void writeMsgToScreen(String msg) {
 
 void relaySw(bool relay) {
 
-relaySwing = 0;
+  relaySwing = 0;
 
   if (relay != relayOn) {
 
     if (relay) {
-      logger("Relay ON");
       writeMsgToScreen("ON");
+      delay(100);
+      logger("Relay ON");
 
     } else {
-      logger("Relay OFF");
       writeMsgToScreen("OFF");
+      delay(100);
+      logger("Relay OFF");
+
     }
     relayOn = relay;
 
@@ -725,7 +733,7 @@ void controllerSetup() {
   u8g2.enableUTF8Print();    // enable UTF8 support for the Arduino print() function
 
   EEPROM.write(CONTROLLER_EEPROM, deviceID);
-
+  EEPROM.commit();
   delay(500);
 }
 
