@@ -1,3 +1,4 @@
+#include <EEPROM.h>
 #include <dummy.h>
 #include <SPI.h>
 #include <U8g2lib.h>
@@ -5,9 +6,11 @@
 #include <WiFiUdp.h>
 
 
+
 //INIT
 
-bool CONTROLLER = false;
+bool CONTROLLER;
+int CONTROLLER_EEPROM = 0;
 bool MASTER_ALIVE = false;
 int masterCheck = 0;
 bool masterSaysRelay = false;
@@ -144,25 +147,9 @@ void setup()
 {
 
   Serial.begin(115200);
+  EEPROM.begin(64);
 
-  if (CONTROLLER) {
-    pinMode(5, INPUT); //Clock
-    pinMode(4, INPUT); //Mr DT AFC
-    pinMode(0, INPUT); //Switch
 
-    attachInterrupt(digitalPinToInterrupt(5), ro_cl, FALLING);
-    attachInterrupt(digitalPinToInterrupt(4), ro_dt, FALLING);
-    attachInterrupt(digitalPinToInterrupt(0), ro_sw, FALLING);
-
-    Serial.println("This is a controller");
-    pinMode(relayPin, OUTPUT); //PUT RELAY TO OUTPUT MODE
-    digitalWrite(relayPin, 1); //RELAY OFF
-
-    //SCREEN INIT
-    u8g2.begin();
-    u8g2.enableUTF8Print();    // enable UTF8 support for the Arduino print() function
-    delay(500);
-  }
   //CONNECT WiFi
 
   WiFi.begin("Hello Neighbour!", "whiffy999!");
@@ -184,7 +171,7 @@ void setup()
     Serial.println("UDP Port established");
   };
 
-
+  CONTROLLER = (EEPROM.read(CONTROLLER_EEPROM) == deviceID);
 
   delay(500);
 }
@@ -499,6 +486,17 @@ void loop() {
                 writeTempsToScreen(meanTemp);
               }
               break;
+
+            case 'C' :
+              {
+                CONTROLLER = false;
+                if (asciiToHex(incomingPacket[2], incomingPacket[3]) == deviceID) {
+
+                  controllerSetup();
+
+                }
+              }
+              break;
           }
         }
 
@@ -701,6 +699,29 @@ byte asciiToHex(byte upper, byte lower) {
   lower -= 55;
 
   return ((upper << 4) | lower );
+}
+
+void controllerSetup() {
+  pinMode(5, INPUT); //Clock
+  pinMode(4, INPUT); //Mr DT AFC
+  pinMode(0, INPUT); //Switch
+
+  attachInterrupt(digitalPinToInterrupt(5), ro_cl, FALLING);
+  attachInterrupt(digitalPinToInterrupt(4), ro_dt, FALLING);
+  attachInterrupt(digitalPinToInterrupt(0), ro_sw, FALLING);
+
+  CONTROLLER = true;
+  Serial.println("This is a controller");
+  pinMode(relayPin, OUTPUT); //PUT RELAY TO OUTPUT MODE
+  digitalWrite(relayPin, 1); //RELAY OFF
+
+  //SCREEN INIT
+  u8g2.begin();
+  u8g2.enableUTF8Print();    // enable UTF8 support for the Arduino print() function
+
+  EEPROM.write(CONTROLLER_EEPROM, deviceID);
+
+  delay(500);
 }
 
 void logger(String str) {
