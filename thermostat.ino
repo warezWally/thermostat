@@ -7,7 +7,7 @@
 
 //INIT
 
-bool CONTROLLER;
+bool CONTROLLER = false;
 bool MASTER_ALIVE = false;
 int masterCheck = 0;
 bool masterSaysRelay = false;
@@ -23,6 +23,11 @@ unsigned long count = 0;
 int targetTemp = 21;
 float meanTemp = 0;
 
+int x_one = 2;
+int x_two = 1000;
+int s_three = 500;
+int d_four = 10;
+
 byte howManyValid = 0;
 const unsigned int deviceMax = 8;
 float readings[9]; //+1 for null pointer -- required.
@@ -35,6 +40,7 @@ byte lives = 3; //HOW MANY MINUTES BEFORE MEASUREMENT IS DELETED;
 int relayPin = 2;
 bool relayOn = false;
 unsigned long relayTimeout = 0;
+char relaySwing = 0;
 
 //SCREEN
 
@@ -49,7 +55,7 @@ WiFiUDP Udp;
 IPAddress broadcast(192, 168, 0, 255);
 const int UDP_PORT = 3141;
 
-unsigned int deviceID;
+byte deviceID;
 
 char incomingPacket[255];  // buffer for incoming packets
 
@@ -90,7 +96,7 @@ unsigned long *timers[] = {&roSwTimeout, &relayTimeout, &timeOut};
 
 //END INIT
 
-//ENCODER FUNCTIONS
+//ENCODER INTERRUPT FUNCTIONS
 void ro_dt () { //DT GOES LOW
 
   if (!dtLow) {
@@ -121,7 +127,9 @@ void ro_cl () { //CLK GOES LOW
 
 void ro_sw () {
 
-  roSw = false;
+  Serial.println("BUTTON");
+
+  //roSw = false;
 
   if (timeNow > roSwTimeout) {
 
@@ -136,31 +144,25 @@ void setup()
 {
 
   Serial.begin(115200);
-  pinMode(5, INPUT); //Clock
-  pinMode(4, INPUT); //Mr DT AFC
-  pinMode(0, INPUT); //Switch
 
-  attachInterrupt(digitalPinToInterrupt(5), ro_cl, FALLING);
-  attachInterrupt(digitalPinToInterrupt(4), ro_dt, FALLING);
-  attachInterrupt(digitalPinToInterrupt(0), ro_sw, FALLING);
+  if (CONTROLLER) {
+    pinMode(5, INPUT); //Clock
+    pinMode(4, INPUT); //Mr DT AFC
+    pinMode(0, INPUT); //Switch
 
-  pinMode(relayPin, INPUT);
+    attachInterrupt(digitalPinToInterrupt(5), ro_cl, FALLING);
+    attachInterrupt(digitalPinToInterrupt(4), ro_dt, FALLING);
+    attachInterrupt(digitalPinToInterrupt(0), ro_sw, FALLING);
 
-  delay(500);
-
-  if (digitalRead(relayPin)) {
-
-    //THIS IS A CONTROLLER
-    CONTROLLER = true;
-
-    //RELAY INIT
     Serial.println("This is a controller");
-    pinMode(relayPin, OUTPUT);
-    digitalWrite(relayPin, 1);
+    pinMode(relayPin, OUTPUT); //PUT RELAY TO OUTPUT MODE
+    digitalWrite(relayPin, 1); //RELAY OFF
 
-
+    //SCREEN INIT
+    u8g2.begin();
+    u8g2.enableUTF8Print();    // enable UTF8 support for the Arduino print() function
+    delay(500);
   }
-
   //CONNECT WiFi
 
   WiFi.begin("Hello Neighbour!", "whiffy999!");
@@ -182,26 +184,24 @@ void setup()
     Serial.println("UDP Port established");
   };
 
-  //SCREEN INIT
-  u8g2.begin();
-  u8g2.enableUTF8Print();    // enable UTF8 support for the Arduino print() function
+
 
   delay(500);
 }
 
 void loop() {
 
-  timeNow = millis();
+  timeNow = millis(); //STORE RUNTIME OF THIS LOOP
 
   if (timeNow < timePrev) { //ROLLOVER HAS HAPPENED
 
-    for (int i = 0; i < sizeof(timers) / 2; i++) {
+    for (int i = 0; i < sizeof(timers) / 2; i++) { //CLEAR TIMERS
 
       *timers[i] = *timers[i] > timePrev ? (*timers[i] - timePrev) : 0;
 
     }
 
-sendPacket("L_ROLLOVER OCCURED");
+    logger("ROLLOVER OCCURED");
 
   }
   timePrev = timeNow;
@@ -209,68 +209,66 @@ sendPacket("L_ROLLOVER OCCURED");
 
   if (CONTROLLER) {
     if (roSw) { //  && timeNow > roSwTimeout) {
-      Serial.print("BUTTON");
+
       if (relayOn) {
 
-        Serial.println("Relay is on, going off");
+        logger("Relay is on, going off");
 
         relaySw(false);
       } else if (timeNow >= relayTimeout) {
 
-        //relayTimeout = timeNow + (1000 * 60 );//* 60 * 3);
+        relayTimeout = timeNow + ((1000 * 60 ) * 60 * 3);
 
-        Serial.print("Relay Off In: ");
-        Serial.println(relayTimeout);
+        logger("Relay Off In: " + String(relayTimeout));
+        //        logger(String(relayTimeout));
         relaySw(true);
 
 
       }
-	roSw = false;
+      roSw = false;
     } else if (!MASTER_ALIVE) {
-
-      //   Serial.println("No Master");
 
       if (timeNow > relayTimeout) {
 
-        relaySw((meanTemp < targetTemp));
+        relaySwing += (meanTemp < targetTemp) ? 1 : -1;
+
+        if (relaySwing <= -3) {
+
+          relaySw(false);
+
+        } else if (relaySwing >= 3) {
+
+          relaySw(true);
+
+        }
+
       }
 
     } else {
 
-      //  Serial.print("Master In Control: ");
-      //  Serial.println(masterSaysRelay);
-
       relaySw(masterSaysRelay);
 
     }
+
+    if (ro_dir) {
+      timeOut += 100;
+      targetTemp += ro_dir;
+      writeTempsToScreen(meanTemp);
+    }
+
+    dtLow = !digitalRead(4);
+    clLow = !digitalRead(5);
+
+    ro_dir = 0;
   }
-  if (ro_dir) {
-    targetTemp += ro_dir;
-    writeTempsToScreen(meanTemp);
-  }
-
-  dtLow = !digitalRead(4);
-  clLow = !digitalRead(5);
-
-  //roSw = false;
-
-  ro_dir = 0;
-
-  // roSw = timeNow > roSwTimeout ? false : roSw;
-
-int x_one = 2;
-int x_two = 1000;
-int s_three = 500;
-int d_four = 10;
-
-  reading = float(analogRead(readingPin)) / 1023; //Convert to Voltage Float 0.00 - 1.00
+  reading = float(analogRead(readingPin)) / 1024 ; //Convert to Voltage Float 0.00 - 1.00
   reading = ((reading * x_one * x_two) - s_three) / d_four; //Curve on specs of TGZ
-  temp_float += reading;
+  temp_float += reading; //ADD READING TO VARIABLE, DIVIDED BY COUNT AFTER TIMEOUT
   count++;
 
-
-
   if (timeNow >= timeOut) {
+
+    logger("Time: " + String(timeNow));
 
     masterCheck--;
     if (masterCheck <= 0) {
@@ -280,33 +278,30 @@ int d_four = 10;
     }
 
     timeOut = timeNow + (secondDelay * 1000);
-    //Udp.stop();
     temp_float /= count;
-    // temp_int = int(temp_float);
 
     addMeasurement(temp_float, deviceID);
 
-	String str = "M";
-	str.concat(tempStr);
-	sendPacket(str);
+    String str = "M";
+    str.concat(dtostrf(temp_float, 5, 2, tempStr));
+    sendPacket(str); //BROADCAST MEASUREMENT OUT
+    /*
+        if (Udp.beginPacketMulticast(broadcast, UDP_PORT, WiFi.localIP())) {
 
-    // writeTempsToScreen() ;
-    if (Udp.beginPacketMulticast(broadcast, UDP_PORT, WiFi.localIP())) {
+          Serial.println("Writing Packet");
 
-      Serial.println("Writing Packet");
+          dtostrf(temp_float, 5, 2, tempStr);
 
-      dtostrf(temp_float, 5, 2, tempStr);
+          Udp.write("M");
 
-      Udp.write("M");
+          Udp.write(tempStr, sizeof(tempStr));
 
-      Udp.write(tempStr, sizeof(tempStr));
+          Udp.endPacket();
 
-      Udp.endPacket();
+          delay(100);
 
-      delay(100);
-
-    }
-
+        }
+    */
 
 
     meanTemp = 0;
@@ -317,7 +312,7 @@ int d_four = 10;
 
     for (byte i = 0; i < deviceMax; i++) {
 
-      if (alive[i] <= 0) {
+      if (alive[i] <= 0) { //IF ALIVE TIMER HAS ELAPSED, CLEAR ALL DATA FOR THAT ROW
 
         readings[i] = 0;
         addresses[i] = 0;
@@ -330,27 +325,26 @@ int d_four = 10;
 
       }
 
-      totalBias += (bias[i] * !!(readings[i]));
+      totalBias += (bias[i] * !!(readings[i])); //IF READING IS NOT 0 ADD THIS ROW's BIAS TO TOTAL
 
     }
 
-  bool biasMade = false;
+    bool biasMade = false;
 
-    if (!totalBias) { //CREATE A DEFAULT BIAS
+    if (!totalBias) { //IF NO BIAS FOUND, CREATE A DEFAULT BIAS
       for ( byte i = 0; i < deviceMax; i++) {
 
-        totalBias += bias[i] = readings[i] ? 12.5 : 0;
-
-
+        totalBias += bias[i] = readings[i] ? 12.5 : 0; //12.5 per legal reading, for a total of 8 devices (8*12.5=100);
 
       }
 
-      biasMade = true;
+      biasMade = true; //DEFAULT BIAS USED
+
     }
+
     for (byte i = 0; i < deviceMax ; i++) {
 
-      meanTemp += ((bias[i] / totalBias) * readings[i]);
-
+      meanTemp += ((bias[i] / totalBias) * (readings[i] - (!!readings[i] * 100))); //IF READING HAS ADDRESS
 
       howManyValid += (!!readings[i] * !!bias[i]);
 
@@ -387,91 +381,135 @@ int d_four = 10;
 
     switch (incomingPacket[0])   {
       case 'C' :
+        {
+          Serial.println("Command Recieved");
+          incomingPacket[0] = 0x20;
 
-        Serial.println("Command Recieved");
+          switch (incomingPacket[1]) {
 
-        switch (incomingPacket[1]) {
+            case 'A' :
+              {
 
-          case 'A' :
+                MASTER_ALIVE = incomingPacket[2] - 48;
 
+                Serial.print("Master ");
+                Serial.print(incomingPacket[1]);
+                Serial.print(": ");
+                Serial.println(MASTER_ALIVE);
 
-            MASTER_ALIVE = incomingPacket[2] - 48;
-
-            Serial.print("Master ");
-            Serial.print(incomingPacket[1]);
-            Serial.print(": ");
-            Serial.println(MASTER_ALIVE);
-
-            masterCheck = 3;
-
-            break;
-
-          case 'R' :
-
-            masterSaysRelay = incomingPacket[2] - 48;
-
-            Serial.print("Master Says Relay: ");
-            Serial.println(masterSaysRelay);
-            break;
-
-          case 'B' :
-
-            char biasBuild[8];
-            byte buildIndex = 0;
-            byte gotAddr = 0;
-            bool biasBuilt = false;
-
-            Serial.println(incomingPacket);
-
-            for (byte f = 2; f < len; f++) {
-
-              if (!gotAddr) {
-                gotAddr = asciiToHex(incomingPacket[f], incomingPacket[(f + 1)]);
-                f++;
-                f++;
+                masterCheck = 3;
               }
-              if (incomingPacket[f] == '-' || incomingPacket[f] == '.' || (incomingPacket[f] - 48 < 10)) {
+              break;
 
-                biasBuild[buildIndex++] = incomingPacket[f];
+            case 'R' :
+              {
+                masterSaysRelay = incomingPacket[2] - 48;
+
+                Serial.print("Master Says Relay: ");
+                Serial.println(masterSaysRelay);
 
               }
+              break;
 
-              biasBuilt = (incomingPacket[f] == '_') ? true : false;
+            case 'B' :
+              {
+                char biasBuild[8];
+                byte buildIndex = 0;
+                byte gotAddr = 0;
+                bool biasBuilt = false;
 
-              if (biasBuilt) {
+                Serial.println(incomingPacket);
 
-                Serial.print("BIAS: ");
-                Serial.println(atof(biasBuild));
-                Serial.print("ADDR: ");
-                Serial.println(gotAddr);
+                for (byte f = 2; f < len; f++) {
 
-                for (byte i = 0; i < deviceMax; i++) {
+                  if (!gotAddr) {
+                    gotAddr = asciiToHex(incomingPacket[f], incomingPacket[(f + 1)]);
+                    f++;
+                    f++;
+                  }
+                  if (incomingPacket[f] == '-' || incomingPacket[f] == '.' || (incomingPacket[f] - 48 < 10)) {
 
-                  if (addresses[i] == gotAddr) {
-                    bias[i] = atof(biasBuild);
-                    break;
+                    biasBuild[buildIndex++] = incomingPacket[f];
+
+                  }
+
+                  biasBuilt = (incomingPacket[f] == '_') ? true : false;
+
+                  if (biasBuilt) {
+
+                    Serial.print("BIAS: ");
+                    Serial.println(atof(biasBuild));
+                    Serial.print("ADDR: ");
+                    Serial.println(gotAddr);
+
+                    for (byte i = 0; i < deviceMax; i++) {
+
+                      if (addresses[i] == gotAddr) {
+                        bias[i] = atof(biasBuild);
+                        break;
+                      }
+
+                    }
+                    buildIndex = 0;
+                    gotAddr = 0;
+                    biasBuilt = false;
                   }
 
                 }
-                buildIndex = 0;
-                gotAddr = 0;
-                biasBuilt = false;
               }
+              break;
 
-            }
+            case 'F' :
+              {
+                incomingPacket[1] = 0x20;
+
+                switch (incomingPacket[2] - 48) {
+
+                  case 1 :
+                    incomingPacket[2] = 0x20;
+                    x_one = atoi(incomingPacket);
+                    break;
+
+                  case 2:
+                    incomingPacket[2] = 0x20;
+                    x_two = atoi(incomingPacket);
+                    break;
+
+                  case 3:
+                    incomingPacket[2] = 0x20;
+                    s_three = atoi(incomingPacket);
+                    break;
+
+                  case 4:
+                    incomingPacket[2] = 0x20;
+                    d_four = atoi(incomingPacket);
+                    break;
+
+                }
+
+              }
+              break;
 
 
-            break;
+            case 'T' :
+              {
+                incomingPacket[1] = 0x20;
+
+                targetTemp = atoi(incomingPacket);
+                writeTempsToScreen(meanTemp);
+              }
+              break;
+          }
         }
 
         break;
 
       //case 'M':
       default:
-
-        incomingPacket[0] = 0x20;
-        addMeasurement(atof(incomingPacket), Udp.remoteIP()[3]);
-
+        {
+          incomingPacket[0] = 0x20;
+          addMeasurement(atof(incomingPacket), Udp.remoteIP()[3]);
+        }
         break;
     }
     //yield();
@@ -483,21 +521,22 @@ int d_four = 10;
 
 
 }
-void sendPacket(String str){
+void sendPacket(String str) {
 
-if (Udp.beginPacketMulticast(broadcast, UDP_PORT, WiFi.localIP())) {
+  if (Udp.beginPacketMulticast(broadcast, UDP_PORT, WiFi.localIP())) {
 
-      Serial.println("Writing Packet");
+    Serial.println("Writing Packet");
+    Serial.println(str);
+    char charred[255];
+    str.toCharArray(charred, str.length() + 1);
 
-      dtostrf(temp_float, 5, 2, tempStr);
+    Udp.write(charred, str.length() + 1);
 
-      Udp.write(tr, sizeof(tempStr));
+    Udp.endPacket();
 
-      Udp.endPacket();
+    delay(50); //MAYBE 100;
 
-      delay(100);
-
-    }
+  }
 
 
 }
@@ -564,15 +603,17 @@ void relaySw(bool relay) {
   if (relay != relayOn) {
 
     if (relay) {
-
+      logger("Relay ON");
       writeMsgToScreen("ON");
 
     } else {
-
+      logger("Relay OFF");
       writeMsgToScreen("OFF");
     }
     relayOn = relay;
+    relaySwing = 0;
     digitalWrite(relayPin, !relay);
+    timeOut += 1500;
     delay(1000);
   }
 }
@@ -591,7 +632,7 @@ void addMeasurement(float measurement, byte address) {
     if (addresses[i] == address) {
 
       alive[i] = lives;
-      readings[i] = measurement;
+      readings[i] = measurement + 100;
       done = true;
     }
 
@@ -604,7 +645,7 @@ void addMeasurement(float measurement, byte address) {
     Serial.print("|");
 
     Serial.print(" ");
-    Serial.print(readings[i]);
+    Serial.print(readings[i] ? readings[i] - 100 : readings[i]);
     Serial.print(" ");
 
 
@@ -660,5 +701,13 @@ byte asciiToHex(byte upper, byte lower) {
   lower -= 55;
 
   return ((upper << 4) | lower );
+}
+
+void logger(String str) {
+
+  Serial.print("LOGGER:" );
+  Serial.println(str);
+  sendPacket("L" + str);
+
 }
 
