@@ -27,10 +27,8 @@ unsigned long count = 0;
 int targetTemp = 21;
 float meanTemp = 0;
 
-int x_one = 2;
-int x_two = 1000;
-int s_three = 500;
-int d_four = 10;
+int f_sub = 520;//500;
+float f_div = 9.6;//10;
 
 byte howManyValid = 0;
 const unsigned int deviceMax = 8;
@@ -221,7 +219,7 @@ void loop() {
       }
       roSw = false;
     } else if (!MASTER_ALIVE) {
-     // Serial.println("relaySwing: " + String(relaySwing));
+      // Serial.println("relaySwing: " + String(relaySwing));
       if (timeNow > relayTimeout) {
 
         if (relaySwing <= -3) {
@@ -247,6 +245,10 @@ void loop() {
       targetTemp += ro_dir;
       writeTempsToScreen(meanTemp);
       relaySwing = int(targetTemp - meanTemp) * 10;
+
+      if (MASTER_ALIVE) {
+        sendPacket("T" + String(targetTemp));
+      }
     }
 
     dtLow = !digitalRead(4);
@@ -254,10 +256,18 @@ void loop() {
 
     ro_dir = 0;
   }
-  reading = float(analogRead(readingPin)) / 1024 ; //Convert to Voltage Float 0.00 - 1.00
-  reading = ((reading * x_one * x_two) - s_three) / d_four; //Curve on specs of TGZ
+  reading = float(analogRead(readingPin)) / 1023 ; //Convert to Voltage Float 0.00 - 1.00
+  reading = ((reading * 2 * 1000) - f_sub) / f_div; //Curve on specs of TGZ
   temp_float += reading; //ADD READING TO VARIABLE, DIVIDED BY COUNT AFTER TIMEOUT
   count++;
+
+  /*
+    int x_one = 2;
+    int x_two = 1000;
+    int s_three = 500;
+    int d_four = 10;
+
+  */
 
   if (timeNow >= timeOut) {
 
@@ -384,6 +394,12 @@ void loop() {
             case 'A' :
               {
 
+                if (!MASTER_ALIVE && (incomingPacket[2] - 48)) {
+
+                  sendPacket("T" + String(targetTemp));
+
+                }
+
                 MASTER_ALIVE = incomingPacket[2] - 48;
 
                 Serial.print("Master ");
@@ -457,27 +473,18 @@ void loop() {
               {
                 incomingPacket[1] = 0x20;
 
-                switch (incomingPacket[2] - 48) {
+                switch (incomingPacket[2]) {
 
-                  case 1 :
+                  case 'S' :
                     incomingPacket[2] = 0x20;
-                    x_one = atoi(incomingPacket);
+                    f_sub = atoi(incomingPacket);
                     break;
 
-                  case 2:
+                  case 'D':
                     incomingPacket[2] = 0x20;
-                    x_two = atoi(incomingPacket);
+                    f_div = atof(incomingPacket);
                     break;
 
-                  case 3:
-                    incomingPacket[2] = 0x20;
-                    s_three = atoi(incomingPacket);
-                    break;
-
-                  case 4:
-                    incomingPacket[2] = 0x20;
-                    d_four = atoi(incomingPacket);
-                    break;
 
                 }
 
