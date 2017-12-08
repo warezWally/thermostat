@@ -27,8 +27,8 @@ unsigned long count = 0;
 int targetTemp = 21;
 float meanTemp = 0;
 
-int f_sub = 520;//500;
-float f_div = 9.6;//10;
+unsigned int f_sub = 4730//5200;//500;
+unsigned int f_div = 96;//10;
 
 byte howManyValid = 0;
 const unsigned int deviceMax = 8;
@@ -153,22 +153,7 @@ void setup()
 
   WiFi.begin("Hello Neighbour!", "whiffy999!");
 
-  Serial.print("Connecting");
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println();
-
-  Serial.print("Connected, IP address: ");
-  Serial.println(WiFi.localIP());
-
-  deviceID = WiFi.localIP()[3];
-
-  if (Udp.begin(UDP_PORT)) {
-    Serial.println("UDP Port established");
-  };
+wifiConnect();
 
   CONTROLLER = (EEPROM.read(CONTROLLER_EEPROM) == deviceID);
   if (CONTROLLER) {
@@ -257,7 +242,7 @@ void loop() {
     ro_dir = 0;
   }
   reading = float(analogRead(readingPin)) / 1023 ; //Convert to Voltage Float 0.00 - 1.00
-  reading = ((reading * 2 * 1000) - f_sub) / f_div; //Curve on specs of TGZ
+  reading = ((reading * 2 * 10000) - f_sub) / f_div; //Curve on specs of TGZ
   temp_float += reading; //ADD READING TO VARIABLE, DIVIDED BY COUNT AFTER TIMEOUT
   count++;
 
@@ -273,6 +258,7 @@ void loop() {
 
     logger("Time: " + String(timeNow));
     logger("Relay Swing: " + String(relaySwing));
+    sendPacket("T" + String(targetTemp));
 
     masterCheck--;
     if (masterCheck <= 0) {
@@ -289,27 +275,8 @@ void loop() {
     String str = "M";
     str.concat(dtostrf(temp_float, 5, 2, tempStr));
     sendPacket(str); //BROADCAST MEASUREMENT OUT
-    /*
-        if (Udp.beginPacketMulticast(broadcast, UDP_PORT, WiFi.localIP())) {
-
-          Serial.println("Writing Packet");
-
-          dtostrf(temp_float, 5, 2, tempStr);
-
-          Udp.write("M");
-
-          Udp.write(tempStr, sizeof(tempStr));
-
-          Udp.endPacket();
-
-          delay(100);
-
-        }
-    */
-
-
-    meanTemp = 0;
-    howManyValid = 0;
+    
+howManyValid = 0;
     //CALCULATE MEAN TEMP
 
     float totalBias = 0;
@@ -482,11 +449,13 @@ void loop() {
 
                   case 'D':
                     incomingPacket[2] = 0x20;
-                    f_div = atof(incomingPacket);
+                    f_div = atoi(incomingPacket);
                     break;
 
 
                 }
+
+                logger("Formula is: ((m * 2 * 1000) - " + String(f_sub) + ") / " + String(f_div));
 
               }
               break;
@@ -553,6 +522,40 @@ void sendPacket(String str) {
 
 
 }
+
+bool wifiConnect() {
+
+WiFi.forceSleepEnd();
+delay(1);
+
+  Serial.print("Connecting");
+   
+	for(byte i = 0;i<8;i++){
+
+if(WiFi.status() != WL_CONNECTED)
+  {
+    delay(500);
+    Serial.print(".");
+  } else {
+	break;
+}
+}
+
+logger(WiFi.status() != WL_CONNECTED ? "Unable to Connect To WiFi" : "Connected to Wifi");
+	
+	Serial.println();
+  Serial.print("Connected, IP address: ");
+  Serial.println(WiFi.localIP());
+
+  deviceID = WiFi.localIP()[3];
+
+  if (Udp.begin(UDP_PORT)) {
+    Serial.println("UDP Port established");
+  };
+
+}
+
+
 void writeTempsToScreen(int temp) {
 
   u8g2.setFont(u8g2_font_logisoso54_tf);
@@ -617,6 +620,11 @@ void relaySw(bool relay) {
 
   if (relay != relayOn) {
 
+Udp.stop();
+WiFi.disconnect();
+WiFi.forceSleepBegin();
+delay(11);
+
     if (relay) {
       writeMsgToScreen("ON");
       delay(100);
@@ -630,9 +638,16 @@ void relaySw(bool relay) {
     }
     relayOn = relay;
 
-    digitalWrite(relayPin, !relay);
     timeOut += 1500;
+
+    digitalWrite(relayPin, !relay);
+
     delay(1000);
+
+wifiConnect();
+
+sendPacket("T" + String(targetTemp));
+
   }
 }
 
@@ -746,8 +761,6 @@ void controllerSetup() {
 
 void logger(String str) {
 
-  Serial.print("LOGGER:" );
-  Serial.println(str);
   sendPacket("L" + str);
 
 }
