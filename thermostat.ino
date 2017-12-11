@@ -27,8 +27,8 @@ unsigned long count = 0;
 int targetTemp = 21;
 float meanTemp = 0;
 
-unsigned int f_sub = 4730//5200;//500;
-unsigned int f_div = 96;//10;
+unsigned int f_sub = 4730;//5200;//5000;
+unsigned int f_div = 96;//100;
 
 byte howManyValid = 0;
 const unsigned int deviceMax = 8;
@@ -151,9 +151,9 @@ void setup()
 
   //CONNECT WiFi
 
-  WiFi.begin("Hello Neighbour!", "whiffy999!");
 
-wifiConnect();
+
+  wifiConnect();
 
   CONTROLLER = (EEPROM.read(CONTROLLER_EEPROM) == deviceID);
   if (CONTROLLER) {
@@ -259,7 +259,8 @@ void loop() {
     logger("Time: " + String(timeNow));
     logger("Relay Swing: " + String(relaySwing));
     sendPacket("T" + String(targetTemp));
-
+    sendPacket("R" + String(!!relayOn + 0));
+  
     masterCheck--;
     if (masterCheck <= 0) {
 
@@ -275,8 +276,9 @@ void loop() {
     String str = "M";
     str.concat(dtostrf(temp_float, 5, 2, tempStr));
     sendPacket(str); //BROADCAST MEASUREMENT OUT
-    
-howManyValid = 0;
+
+    meanTemp = 0;
+    howManyValid = 0;
     //CALCULATE MEAN TEMP
 
     float totalBias = 0;
@@ -322,11 +324,7 @@ howManyValid = 0;
       bias[i] = biasMade ? 0 : bias[i];
     }
 
-    Serial.print("Mean Temp: ");
-    Serial.println(meanTemp);
 
-    Serial.print("Valid: ");
-    Serial.println(howManyValid);
 
     count = 0;
     temp_float = 0;
@@ -334,6 +332,12 @@ howManyValid = 0;
     meanTemp = meanTemp / howManyValid;
     relaySwing += (meanTemp < targetTemp) ? (1 + (firstRun * 10)) : (-1 - (firstRun * 10)) ;
     firstRun = false;
+
+    Serial.print("Mean Temp: ");
+    Serial.println(meanTemp);
+
+    Serial.print("Valid: ");
+    Serial.println(howManyValid);
   }
 
   writeTempsToScreen(int(meanTemp));
@@ -525,30 +529,30 @@ void sendPacket(String str) {
 
 bool wifiConnect() {
 
-WiFi.forceSleepEnd();
-delay(1);
+  WiFi.forceSleepWake();
+  delay(100);
 
   Serial.print("Connecting");
-   
-	for(byte i = 0;i<8;i++){
+  WiFi.begin("Hello Neighbour!", "whiffy999!");
+  for (byte i = 0; i < 60; i++) {
 
-if(WiFi.status() != WL_CONNECTED)
-  {
-    delay(500);
-    Serial.print(".");
-  } else {
-	break;
-}
-}
+    if (WiFi.status() != WL_CONNECTED)
+    {
+      delay(500);
+      Serial.print(".");
+    } else {
+      break;
+    }
+  }
 
-logger(WiFi.status() != WL_CONNECTED ? "Unable to Connect To WiFi" : "Connected to Wifi");
-	
-	Serial.println();
+  logger(WiFi.status() != WL_CONNECTED ? "Unable to Connect To WiFi" : "Connected to Wifi");
+
+  Serial.println();
   Serial.print("Connected, IP address: ");
   Serial.println(WiFi.localIP());
 
   deviceID = WiFi.localIP()[3];
-
+  delay(200);
   if (Udp.begin(UDP_PORT)) {
     Serial.println("UDP Port established");
   };
@@ -620,10 +624,10 @@ void relaySw(bool relay) {
 
   if (relay != relayOn) {
 
-Udp.stop();
-WiFi.disconnect();
-WiFi.forceSleepBegin();
-delay(11);
+    Udp.stop();
+    WiFi.disconnect();
+    WiFi.forceSleepBegin();
+    delay(11);
 
     if (relay) {
       writeMsgToScreen("ON");
@@ -644,11 +648,12 @@ delay(11);
 
     delay(1000);
 
-wifiConnect();
+    wifiConnect();
 
-sendPacket("T" + String(targetTemp));
-
+    sendPacket("T" + String(targetTemp));
+    sendPacket("R" + String(!!relayOn + 0));
   }
+
 }
 
 void addMeasurement(float measurement, byte address) {
