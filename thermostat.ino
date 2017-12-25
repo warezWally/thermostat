@@ -226,10 +226,17 @@ void loop() {
     }
 
     if (ro_dir) {
-      timeOut += 100;
+	timeOut = timeNow + 100;
+      relayTimeout = timeNow + 500;
       targetTemp += ro_dir;
       writeTempsToScreen(meanTemp);
-      relaySwing = int(targetTemp - meanTemp) * 10;
+
+if(targetTemp<meanTemp){
+relaySwing = -3;
+} else {
+relaySwing = 3;
+}
+//      relaySwing = int(targetTemp - meanTemp) * 10;
 
       if (MASTER_ALIVE) {
         sendPacket("T" + String(targetTemp));
@@ -260,7 +267,7 @@ void loop() {
     logger("Relay Swing: " + String(relaySwing));
     sendPacket("T" + String(targetTemp));
     sendPacket("R" + String(!!relayOn + 0));
-  
+
     masterCheck--;
     if (masterCheck <= 0) {
 
@@ -471,6 +478,8 @@ void loop() {
 
                 targetTemp = atoi(incomingPacket);
                 relaySwing = int(targetTemp - meanTemp) * 10;
+
+                sendPacket("T" + String(targetTemp));
                 writeTempsToScreen(meanTemp);
               }
               break;
