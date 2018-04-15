@@ -4,13 +4,16 @@
 #include <U8g2lib.h>
 #include <ESP8266WiFi.h>
 #include <WiFiUdp.h>
+#include "DHT.h"
 
+#define DHTTYPE DHT22
 
 
 //INIT
 
 bool CONTROLLER;
 int CONTROLLER_EEPROM = 0;
+int DHT_EEPROM = 0;
 bool MASTER_ALIVE = false;
 int masterCheck = 0;
 bool masterSaysRelay = false;
@@ -26,6 +29,10 @@ unsigned long timeOut = 0;
 unsigned long count = 0;
 int targetTemp = 21;
 float meanTemp = 0;
+float t = 0;
+float h = 0;
+
+byte DHT_PIN = 2;
 
 unsigned int f_sub = 4730;//5200;//5000;
 unsigned int f_div = 96;//100;
@@ -77,7 +84,7 @@ unsigned long timePrev;
 unsigned long *timers[] = {&roSwTimeout, &relayTimeout, &timeOut};
 
 
-
+DHT dht(DHT_PIN, DHTTYPE);
 
 /*
 
@@ -162,6 +169,16 @@ void setup()
 
   }
 
+  DHT_PIN = (EEPROM.read(DHT_EEPROM));
+
+  if (DHT_PIN) {
+
+    Serial.println("Using DHT " + String(DHT_PIN));
+    //DHT dht(DHT_PIN, DHTTYPE);
+    dht.begin();
+
+  }
+
   delay(500);
 }
 
@@ -226,17 +243,17 @@ void loop() {
     }
 
     if (ro_dir) {
-	timeOut = timeNow + 100;
+      timeOut = timeNow + 100;
       relayTimeout = timeNow + 500;
       targetTemp += ro_dir;
       writeTempsToScreen(meanTemp);
 
-if(targetTemp<meanTemp){
-relaySwing = -3;
-} else {
-relaySwing = 3;
-}
-//      relaySwing = int(targetTemp - meanTemp) * 10;
+      if (targetTemp < meanTemp) {
+        relaySwing = -3;
+      } else {
+        relaySwing = 3;
+      }
+      //      relaySwing = int(targetTemp - meanTemp) * 10;
 
       if (MASTER_ALIVE) {
         sendPacket("T" + String(targetTemp));
@@ -248,9 +265,28 @@ relaySwing = 3;
 
     ro_dir = 0;
   }
-  reading = float(analogRead(readingPin)) / 1023 ; //Convert to Voltage Float 0.00 - 1.00
-  reading = ((reading * 2 * 10000) - f_sub) / f_div; //Curve on specs of TGZ
-  temp_float += reading; //ADD READING TO VARIABLE, DIVIDED BY COUNT AFTER TIMEOUT
+
+
+  //TEMP READING
+  if (DHT_PIN) {
+
+    h = dht.readHumidity();
+    t = dht.readTemperature();
+
+    if (isnan(h) || isnan(t)) {
+      Serial.println("Failed to read from DHT sensor! Pin:" + String(DHT_PIN));
+      Serial.println("h: " + String(h));
+      Serial.println("t: " + String(t));
+      count--;
+    } else {
+      temp_float += dht.computeHeatIndex(t, h, false);
+    }
+
+  } else {
+    reading = float(analogRead(readingPin)) / 1023 ; //Convert to Voltage Float 0.00 - 1.00
+    reading = ((reading * 2 * 10000) - f_sub) / f_div; //Curve on specs of TGZ
+    temp_float += reading; //ADD READING TO VARIABLE, DIVIDED BY COUNT AFTER TIMEOUT
+  }
   count++;
 
   /*
@@ -262,6 +298,8 @@ relaySwing = 3;
   */
 
   if (timeNow >= timeOut) {
+
+    timeOut = timeNow + (secondDelay * 1000);
 
     logger("Time: " + String(timeNow));
     logger("Relay Swing: " + String(relaySwing));
@@ -275,7 +313,7 @@ relaySwing = 3;
       masterCheck = 0;
     }
 
-    timeOut = timeNow + (secondDelay * 1000);
+
     temp_float /= count;
 
     addMeasurement(temp_float, deviceID);
@@ -311,10 +349,10 @@ relaySwing = 3;
 
     bool biasMade = false;
 
-    if (!totalBias) { //IF NO BIAS FOUND, CREATE A DEFAULT BIAS
+    if (!totalBias) { //IF NO BIAS FOUND (or 0), CREATE A DEFAULT BIAS
       for ( byte i = 0; i < deviceMax; i++) {
 
-        totalBias += bias[i] = readings[i] ? 12.5 : 0; //12.5 per legal reading, for a total of 8 devices (8*12.5=100);
+        totalBias += bias[i] = (!!readings[i] ? 12.5 : 0); //12.5 per legal reading, for a total of 8 devices (8*12.5=100);
 
       }
 
@@ -324,9 +362,19 @@ relaySwing = 3;
 
     for (byte i = 0; i < deviceMax ; i++) {
 
-      meanTemp += ((bias[i] / totalBias) * (readings[i] - (!!readings[i] * 100))); //IF READING HAS ADDRESS
+      if (!!bias[i]) {
 
-      howManyValid += (!!readings[i] * !!bias[i]);
+        meanTemp += ((bias[i] / totalBias) * (readings[i] - (!!readings[i] * 100))); //IF READING HAS ADDRESS
+
+      }
+      Serial.println("-----_");
+      Serial.println(String(bias[i]));
+      Serial.println(String(totalBias));
+      Serial.println(String(readings[i]));
+
+
+
+      //howManyValid += (!!readings[i] * !!bias[i]);
 
       bias[i] = biasMade ? 0 : bias[i];
     }
@@ -336,15 +384,12 @@ relaySwing = 3;
     count = 0;
     temp_float = 0;
 
-    meanTemp = meanTemp / howManyValid;
+    //meanTemp = meanTemp// / howManyValid;
     relaySwing += (meanTemp < targetTemp) ? (1 + (firstRun * 10)) : (-1 - (firstRun * 10)) ;
     firstRun = false;
 
     Serial.print("Mean Temp: ");
     Serial.println(meanTemp);
-
-    Serial.print("Valid: ");
-    Serial.println(howManyValid);
   }
 
   writeTempsToScreen(int(meanTemp));
@@ -368,6 +413,15 @@ relaySwing = 3;
           incomingPacket[0] = 0x20;
 
           switch (incomingPacket[1]) {
+
+
+            case 'D' :
+              {
+                EEPROM.write(DHT_EEPROM, incomingPacket[2] - 48);
+                EEPROM.commit();
+                sendPacket("DHT ENABLED ON " + String(deviceID) + "(" + incomingPacket[2] + ")");
+              }
+              break;
 
             case 'A' :
               {
@@ -407,6 +461,13 @@ relaySwing = 3;
                 bool biasBuilt = false;
 
                 Serial.println(incomingPacket);
+
+                //E.G : CB42100_
+
+                // C = Command
+                // B = Bias
+                // 42 = Hex for 66 (address 66)
+                // 100_ = BIAS
 
                 for (byte f = 2; f < len; f++) {
 
@@ -499,10 +560,28 @@ relaySwing = 3;
 
         break;
 
-      //case 'M':
-      default:
+      case 'M':
         {
+
+          /*    byte pointer = 0;
+              bool gotNum = false;
+              for (byte i = 0; i < len; i++) {
+                Serial.print(incomingPacket[i]);
+                if (incomingPacket[i] >= '0' || incomingPacket[i] <= '9' || incomingPacket[i] == '.') {
+                  incomingPacket[pointer++] = incomingPacket[i];
+                  gotNum = true;
+                } else if(gotNum) {
+                  incomingPacket[pointer++] = 0x20;
+                }
+              }
+              while(pointer < len){
+                incomingPacket[pointer++];
+              }
+              Serial.println("yep");
+          */
           incomingPacket[0] = 0x20;
+          Serial.println("Been Given: " + String(atof(incomingPacket)));
+
           addMeasurement(atof(incomingPacket), Udp.remoteIP()[3]);
         }
         break;
@@ -631,7 +710,8 @@ void relaySw(bool relay) {
 
   relaySwing = 0;
 
-  if (relay != relayOn) {
+  if (relay != relayOn) { //RELAY IS SWITCHING
+    noInterrupts();
 
     Udp.stop();
     WiFi.disconnect();
@@ -661,6 +741,7 @@ void relaySw(bool relay) {
 
     sendPacket("T" + String(targetTemp));
     sendPacket("R" + String(!!relayOn + 0));
+    interrupts();
   }
 
 }
@@ -778,3 +859,4 @@ void logger(String str) {
   sendPacket("L" + str);
 
 }
+
